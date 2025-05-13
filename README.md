@@ -2,7 +2,9 @@
 A survival analysis approach on the charging voltage curves measured on a group of 8 batchs of Toyota Li-ion batteries 
 
 ## Motivation
-The use of Survival Analysis techniques on renewable resources was the main motivation. After some research we have found the paper [1], and we dediced to compare its results with respect to other Survival Analysis models. The comparison is made throgh the scores C-index, Integrated Brier Score and Integrated Cumulative AUC.
+The use of Survival Analysis techniques on renewable resources was the main motivation. 
+
+After some research we have found the paper [1], and we dediced to compare its results with respect to other Survival Analysis models. The comparison is made throgh the scores C-index, Integrated Brier Score and Integrated Cumulative AUC.
 
 ## Bibliography
 
