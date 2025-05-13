@@ -1,5 +1,5 @@
 # survAn-batteries
-A survival analysis approach on estimating the EOL probability for a group of 8 batchs of Toyota Li-ion batteries. In the code we have used the voltage charging curves and the methodology could be extended to the discharging voltage curves. 
+A survival analysis approach on estimating the EOL probability for a group of 8 batchs of Toyota Li-ion batteries. In the code we have used the voltage charging curves as covariates and the methodology could be extended to the discharging voltage curves. 
 
 ## Data source
 The cycling data on the 8 batches can be found at [https://data.matr.io/1/](https://data.matr.io/1/).
