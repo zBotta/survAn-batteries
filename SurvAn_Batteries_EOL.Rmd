@@ -3,35 +3,52 @@ title: "Survival Analysis on Li-ion Batteries"
 subtitle: "Using R version 4.5.0"
 author: "Matias BOTTARINI"
 output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: sentence
 ---
+
 # Introduction
 
-For this project, I wanted to find a data set that applies survival analysis on renewable energies. I've found this paper where they use survival analysis to predict the EOL of Toyota battery cells and its data set is openly available.\
-The aim of this document is to reproduce some of the results in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf) and generate several models to predict the lifetime of a cell after collecting its voltage curves. Battery degradation is directly related to the internal resistance, the voltage and capacity of the batteries. The method proposed in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf) uses the voltage charge and discharge curves on the first 50 cycles as covariates. The voltage curves will change its form as the batteries degrade. Moreover, using the voltage as feature eases implementation, as it is monitored by the BMS and it could be easily retrieved, thus showing the practical approach of the method.
+For this project, I wanted to find a data set that applies survival analysis to renewable energies.
+I found a paper which uses survival analysis to predict the EOL of Toyota battery cells and which data set is openly available.\
+The aim of this document is to reproduce some of the results in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf) and generate several models to predict the lifetime of a cell after collecting its voltage curves.
+Battery degradation is directly related to the internal resistance, the voltage and capacity of the batteries.
+The method proposed in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf) uses the voltage charge and discharge curves on the first 50 cycles as covariates.
+The voltage curves will change their form as the batteries degrade.
+Moreover, using the voltage as feature eases implementation, as it is monitored by the BMS and it could be easily retrieved, thus showing the practical approach of the method.
 
-We have focused this document on studying the models using the voltage charge curves' variables.
+I focused on studying the models using the voltage charge curves' variables.
 The proposed models in this report are :
 
-1\.**Cox Proportional Hazard**\
-2. **AFT Weibull**\
-3. **Survival Random Forest**\ 
+1.  **Cox Proportional Hazard**\
+2.  **AFT Weibull**\
+3.  **Survival Random Forest** 
 
-The results with this models are going to be compared to the one used in the paper, which is an **XGBoost implementation of the CoxPH model**.
+I will compare the results obtained with these models to the results from the **XGBoost implementation of the CoxPH model** used in the paper.
 
 ## ETL
 
-To load the data, we have gone to the data source and use the treatment scripts in python and translate them into R and also to have the same data sets as in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf).
+From the data source I used the data treatment scripts in python and translated them into R to have the same data sets as in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf).
 
-The raw data set has a size of 2.6 GB and contains the internal resistance, Voltage, capacity (Qr and Qd) and temperatures measured during the deep cycling of 8 battery batches with 46-48 cells (373 cells in total). **From this initial 373 cells, 362 are left** after the data treatment.
+The raw data set has a size of 2.6 GB and contains the internal resistance, voltage, capacity (Qr and Qd) and temperatures measured during the deep cycling of 8 battery batches with 46-48 cells (373 cells in total).
+**From this initial 373 cells, 362 are left** after the data treatment.
 
-During the data treatment we had to collect the main features and the time-to-event ($T$) and the indicator ($\delta$) as well as the voltage charge and discharge features used in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf) for training the models. The internal resistance, temperature and capacity data where omitted. The raw data is processed and two data sets are converted from python to R and made available:\
+During the data treatment I collected the main features, the time-to-event ($T$) and the indicator ($\delta$) as well as the voltage charge and discharge features used in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf) for training the models.
+The internal resistance, temperature and capacity data where omitted.
+I processed the raw data into two data sets:\
 \
-1) **toyota_structured_data.rds** which contains the voltage values on the charging/discharging cycles for each cell. [Available here](https://drive.google.com/file/d/1pwdzNGyTlPPxpzP3nn4Oh1DrFMXTwaBu/view?usp=drive_link).\
-2) **data_treated.rds** which contains the voltage features (signature paths) on charge and discharge with labels *ch\_{feature_number}* and *dch\_{feature_number}* along with the EOL time ($T$) and the censor indicator ($\delta$) for each cell. [Available here](https://drive.google.com/file/d/130KBKn8tU-QiPUbHOT3necp0_XTpZcPW/view?usp=drive_link)
+1) **toyota_structured_data.rds** which contains the voltage values on the charging/discharging cycles for each cell.
+[Available here](https://drive.google.com/file/d/1pwdzNGyTlPPxpzP3nn4Oh1DrFMXTwaBu/view?usp=drive_link).\
+2) **data_treated.rds** which contains the voltage features (signature paths) on charge and discharge with labels *ch\_{feature_number}* and *dch\_{feature_number}* along with the EOL time ($T$) and the censor indicator ($\delta$) for each cell.
+[Available here](https://drive.google.com/file/d/130KBKn8tU-QiPUbHOT3necp0_XTpZcPW/view?usp=drive_link).\
 
-The raw data set contains the internal resistance, voltage, capacity (Qr and Qd) and temperatures measured during the deep cycling of 8 battery batches with 46-48 cells (373 cells in total). From this initial 373 cells, 362 are left after the data treatment.
-
-We have modified the scripts to import as well the features used in the paper. These features are the path signatures of the voltage curves. By using path signatures on the charge and discharge voltage curves, we can compress the information of these curves into a few features. Particularly, when using a signature of the form $Sig_i(t) = (t, V(t))$ with a signature depth $k=2$, we obtain **6 features for each cycle**. Nonetheless, the author of the paper wants to express it in a way where we compress the voltage of the first 50 cycles for each cell. Thus, when recalculating the paths of the form $P_i = (cycle_i, Sig_i(t))$ for the first 50 cycles and with signature depth of $k=2$, we obtain 36 features ($6^2$) for each cell.
+I modified the scripts to import as well the features used in the paper.
+These features are the path signatures of the voltage curves.
+By using path signatures on the charge and discharge voltage curves, we can compress the information of these curves into a few features.
+Particularly, when using a signature of the form $Sig_i(t) = (t, V(t))$ with a signature depth $k=2$, we obtain **6 features for each cycle**.
+Nonetheless, the author of the paper wants to express it in a way where we compress the voltage of the first 50 cycles for each cell.
+Thus, when recalculating the paths of the form $P_i = (cycle_i, Sig_i(t))$ for the first 50 cycles and with signature depth of $k=2$, we obtain 36 features ($6^2$) for each cell.
 
 Therefore, we observe 36 features for each cell on charging and 36 features for discharging.
 
@@ -52,11 +69,14 @@ data = as.data.frame(readRDS(file="data_treated.rds"))
 
 ## EDA
 
-The cell's fully charge voltage is around 3.5 V and with a capacity of 1.1 Ah. The EOL (End Of Life) of the cell is estimated when the capacity has fallen down below 80% of the batteries capacity, i.e. 0.88 Ah. The EDA plots could be found in the Annex.
+For a fully charged cell, the voltage is around 3.5 V and the full capacity 1.1 Ah.
+The EOL (End Of Life) of the cell is estimated when the capacity has fallen down below 80% of the batteries capacity, i.e. 0.88 Ah.
+The EDA plots could be found in the Annex, see github repository.
 
 The experiments were done with different charging and discharging policies, so we can assume a random behavior when studying the survival risk.
 
-From the 8 batches, 4 were driven to the EOL (b1, b2, b3 and b8) and 4 were censored i.e. they left the experiment without arriving to EOL (b4, b5, b6 and b7). See the following figure (see Figure 3 in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf)).
+From the 8 batches, 4 were driven to the EOL (b1, b2, b3 and b8) and 4 were censored i.e. they left the experiment without arriving to EOL (b4, b5, b6 and b7).
+See the following figure (see Figure 3 in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf)).
 
 ```{r}
 BATCHES = c("b1","b2","b3","b4","b5","b6","b7","b8")
@@ -86,7 +106,9 @@ ggplot(data = df_eol, aes(x=eol, y=batches)) +
     scale_color_manual(values = c("blue","red")) +
   theme_light()
 ```
-We observe that the censored batches never pass the 200 cycles and that most of the EOL happens between 500 and 1000 cycles. The mean is 440 cycles and the median is 119 cycles.
+
+We observe that the censored batches never pass the 200 cycles and that most of the EOL happens between 500 and 1000 cycles.
+The mean is 440 cycles and the median is 119 cycles.
 
 ```{r}
 summary(data$time_to_failure)
@@ -94,14 +116,17 @@ summary(data$time_to_failure)
 
 ### EDA: survival analysis
 
-We have a total of 174 batteries arriving to EOL, with a median time-of-failure of 771 cycles.
+We have a total of 174 batteries arriving to EOL, with a median survival time of 771 cycles.
 
 ```{r}
 fit.KM <- survfit(Surv(time_to_failure, failure) ~ 1, data = data)
 print(fit.KM)
 fit.ggKM <- survfit2(Surv(time_to_failure, failure) ~ 1, data = data) 
 ```
-The survival curve of the Toyota batteries. We could also plot the CFD function, but to reduce space we are going to omit it. The CFD could be plotted by giving the argument *type = "risk"*.
+
+Next, we plot the survival curve of the Toyota batteries.
+We could also plot the CFD function, but to reduce space we are going to omit it.
+The CFD could be plotted by giving the argument *type = "risk"*.
 
 ```{r}
   ggsurvfit(fit.ggKM, type = "survival") +
@@ -113,14 +138,14 @@ The survival curve of the Toyota batteries. We could also plot the CFD function,
   add_confidence_interval() +
   add_risktable()
 ```
+
 # Method
 
-As we are going to compare the results w.r.t. the paper, we need to follow the same methods.
+To be able to compare the results w.r.t. the paper, we need to follow the same methods.
 
-Regarding the data treatment, we are going to split the data and also apply a scale on the data based on the Inter Quantile Range (Robust Scaler in ScikitLearn).
+In terms of data treatment, we will split the data and apply a scale on it based on the Inter Quantile Range (RobustScaler in ScikitLearn).
 
-Regarding the results comparison, we are going to compare each model by the **C-index** (concordance index) and the integrated* **Brier Score** as well as the **Cumulative Dynamic AUC** for $t \ \epsilon \ [500,1000] \ cycles$.
-
+Regarding the results comparison, we are going to compare each model by the **C-index** (concordance index) and the **integrated Brier Score (IBS)** as well as the **integrated Cumulative Dynamic AUC** for $t \ \epsilon \ [500,1000] \ cycles$.
 
 ## Split data into a training and a testing set
 
@@ -135,15 +160,21 @@ d_test <- data[i.testing,]
 ```
 
 ## Cox Proportional model
-We are going to start with the full model to make a variable selection with two methods, one with the step function (AIC criterion) and another with the penalized method (elasticNet method).
+
+We are going to start with the full model to later make a variable selection with two methods, one with the step function (AIC criterion) and another with the penalized method (elasticNet method).
+
 ```{r}
 CPH_ch_full <- coxph(Surv(time_to_failure, failure) ~ ch_1+ch_2+ch_3+ch_4+ch_5+ch_6+ch_7+ch_8+ch_9+ch_10+ch_11+ch_12+ch_13+ch_14+ch_15+ch_16+ch_17+ch_18+ch_19+ch_20+ch_21+ch_22+ch_23+ch_24+ch_25+ch_26+ch_27+ch_28+ch_29+ch_30+ch_31+ch_32+ch_33+ch_34+ch_35+ch_36, data = d_train, model = T, x = T, y=T)
 ```
+
 The variables selected by the step function are: V2, V6, V10, V12, V14, V18, V22, V24, V26, V28, V30, V32 and V34.
+
 ```{r}
 CPH_ch_step <- step(CPH_ch_full, trace = F)
 ```
-We have balanced the penalized regression with $\alpha=0.9$ to introduce a little Ridge term on the ElasticNet cost function.
+
+We have balanced the penalized regression with $\alpha=0.9$ to introduce a non-zero Ridge term (0.1) with respect to the Lasso term (0.9) on the ElasticNet cost function.
+
 ```{r}
 suppressPackageStartupMessages(library(glmnet))
 y_train = Surv(d_train$time_to_failure, d_train$failure)
@@ -153,8 +184,11 @@ CPH_ch_pen <- glmnet(X_train_ch, y_train, family = "cox", alpha = 0.9)
 CPH_ch_pen.cv10 <- cv.glmnet(X_train_ch, y_train, family = "cox")
 plot(CPH_ch_pen.cv10)
 ```
-We are going to select the higher variables selected, which is for the $\lambda_min$. We can observe that the variables selected by the penalized method are different from the step AIC method. 
-The selected variables with $\lambda_{min}=0.01387614$ are V4,V5,V6,V10,V18,V22,V23,V24,V30,V32 and V35.
+
+We are going to select the higher number of variables selected, which corresponds to $\lambda_{min}$.
+We can observe that the variables selected by the penalized method are different from the AIC's step method.
+The selected variables for a $\lambda_{min}=0.01388$ are V4,V5,V6,V10,V18,V22,V23,V24,V30,V32 and V35.
+
 ```{r}
 #coef(CPH_ch_pen.cv10, s = "lambda.min")
 #CPH_ch_pen.cv10$lambda.min
@@ -162,7 +196,6 @@ CPH_ch_pen_lamdbda_min <- coxph(formula = Surv(time_to_failure, failure) ~ ch_4 
     ch_6 + ch_10 + ch_18 + ch_22 + ch_23 + ch_24 + ch_30 + ch_32 + 
     ch_35, data = d_train, model = T, x = T, y=T)
 ```
-
 
 ```{r}
 models <- list(
@@ -173,7 +206,9 @@ models <- list(
 map_dbl(models, ~ summary(.)$concordance[1])
 sapply(models, AIC)
 ```
-Without using the testing data set yet, the penalized model has a higher concordance index. Logically, the step model has higher AIC score.
+
+Without using the testing data set yet, the penalized model has a higher concordance index.
+Logically, the step model has higher AIC score.
 
 ```{r}
 cph_ch.mod <- CPH_ch_pen_lamdbda_min
@@ -188,7 +223,7 @@ X_test_dch = d_test[,-c(1,2,3,4:39)]
 X_test_ch_sel = X_test_ch[,c(4,5,6,10,18,22,23,24,30,32,35)]
 ```
 
-We have used the *survex* library  (R version 4.5.0) to calculate the Integrated Brier Score and The Integrated Cumulative Dynamic AUC between 500 and 1000 cycles. 
+I used the *survex* library (R version 4.5.0) to calculate the Integrated Brier Score and The Integrated Cumulative Dynamic AUC between 500 and 1000 cycles.
 
 ```{r}
 suppressPackageStartupMessages(library(survex))
@@ -205,19 +240,25 @@ cph_ch.mod$ICD_AUC =  integrated_cd_auc(y_test, surv = surv_pred, times = score_
 cph_ch.mod$AIC <- AIC(cph_ch.mod)
 ```
 
-To save space, we have compared the step and the penalized models, and we have obtained better scores (higher C-index and AUC and lower IBS) for **the penalized selected CPH model**.
+I compared the step and the penalized models, and we have obtained better scores (higher C-index and AUC and lower IBS) for **the penalized selected CPH model**.
+To save space, we are not going to show this comparison.
 
 ```{r}
 cph_ch.mod$sch_residual <- cox.zph(cph_ch.mod)
 cph_ch.mod$sch_residual
 ```
-By checking the Schoenfeld global residuals we CAN NOT assume that the hazard rates are proportional for a confidence level of 0.05
+
+By checking the Schoenfeld global residuals we CAN NOT assume that the hazard rates are proportional for a confidence level of 0.05.
+Therefore, we could think about using stratification or truncation; reduce the confidence level to \< 0.02 and accept the H0 or try to catch the non-proportionality with an AFT model.
 
 ## AFT parametric model
 
-We are going to fit an AFT model, and calculate the scores.
-The object *aft_ch.pred* has the predictions on the test set and has a dimension of $dim =( \ 72 , 51 \ )$. The score times has 51 time points (from 500 to 1000) and we have 72 voltage charge curve observations in the test set.
-We find the best score with parameters *dist="weibull"* and an Accelerated Failure Time parameter *param="lifeAcc"*. All the possible parameters in the *ldatools* package where tested.
+Because we don't have proportionality of hazards on the CPH model, I decided to train an AFT model and calculate the scores.
+The object *aft_ch.pred* has the predictions on the test set and has a dimension of $dim =( \ 72 , 51 \ )$.
+The score times has 51 time points (from 500 to 1000) and we have 72 voltage charge curve observations in the test set.
+
+We find the best score with parameters *dist="weibull"* and an Accelerated Failure Time parameter *param="lifeAcc"*.
+All the possible parameters in the *ldatools* package where tested.
 The fitting of the shape converges, and thus we can use this model if needed.
 
 ```{r}
@@ -248,18 +289,26 @@ aft_ch.mod$AIC <- AIC(aft_ch.mod)
 ```
 
 ## Survival Random Forest Model
-First, we've strated training a Survival Random Forest model with all the charge variables, giving us the following table:
+
+First, we started training a Survival Random Forest model with all the charge voltage variables, giving us the following table:
+
 ```{r}
 srf_full_ch <- c(C_idx=0.8255741, IBS=0.08753846, IDC_AUC=0.7698247)
 srf_full_ch
 ```
-However, as we want to compare the previous models, we are going to select the same variables as the penalized Cox PH model, so we can compare the models on the same variables selected.
 
-The combination of parameters *splitrule="logrank"* and *ntree=500* gave the best scores. 
-On the other hand, we have used the variable importance of the Random Forest (see anex in github code) to make a variable selection, but the model is not better than the proposed here.
+However, as we want to compare the previous models, we are going to select the same variables as the penalized Cox PH model, so we can compare the models on the basis of identical variables.
+
+The combination of parameters *splitrule="logrank"* and *ntree=500* gave the best scores.
+On the other hand, I tried to use the variable importance function of the Random Forest (see annex in github code) to make a variable selection, but the model is not better than the one proposed here.
+
 ```{r}
 suppressPackageStartupMessages(library(randomForestSRC))
-srf_ch.mod <- rfsrc(Surv(time_to_failure, failure) ~  ch_4 + ch_5 + ch_6 + ch_10 + ch_18 + ch_22 + ch_23 + ch_24 + ch_30 + ch_32 + ch_35, data=d_train, splitrule = "logrank", ntree = 500)
+srf_ch.mod <- rfsrc(Surv(time_to_failure, failure) ~  
+                      ch_4 + ch_5 + ch_6 + ch_10 + ch_18 + ch_22 + ch_23 + ch_24 + ch_30 + ch_32 + ch_35, 
+                    data=d_train, 
+                    splitrule = "logrank", 
+                    ntree = 500)
 
 srf.explainer <- survex::explain(srf_ch.mod, verbose = F)
 
@@ -276,32 +325,52 @@ srf_ch.mod$AIC <- NA
 ```
 
 # Results and discussion
+
 ```{r}
 score_table <- c(cph_ch.mod$C_idx, cph_ch.mod$IBS, cph_ch.mod$ICD_AUC, cph_ch.mod$AIC)
-score_table <- rbind(score_table, c(aft_ch.mod$C_idx, aft_ch.mod$IBS, aft_ch.mod$ICD_AUC, aft_ch.mod$AIC))
-score_table <- rbind(score_table, c(srf_ch.mod$C_idx, srf_ch.mod$IBS, srf_ch.mod$ICD_AUC, srf_ch.mod$AIC))
+score_table <- rbind(score_table, 
+                     c(aft_ch.mod$C_idx, aft_ch.mod$IBS, aft_ch.mod$ICD_AUC, aft_ch.mod$AIC))
+score_table <- rbind(score_table, 
+                     c(srf_ch.mod$C_idx, srf_ch.mod$IBS, srf_ch.mod$ICD_AUC, srf_ch.mod$AIC))
 score_table <- rbind(score_table, c(0.794, 0.112, 0.9015, NA))
 row.names(score_table) <- c("CPH", "AFT weibull", "Survival Random Forest", "XGBoost (Paper mean values)")
 colnames(score_table) <- c("C-idx","IBS","ICD_AUC","AIC")
 score_table
 ```
-As we can observe in the table, the models CPH (non-parametric) and AFT weibull (parametric) perform similarly. However, the AIC on the CPH model is much lower than on the AFT model. We have proposed an AFT model because the proportional hazard test was not passed on CPH, thus, if we had between the two, we would choose the AFT model over the CPH.
 
-On the other hand, looking at the SRF (Survival Random Forest) model, we see that outperform the rest of the models and even the results published in the paper for the C-index and the IBS scores.
+As we can observe in the table, the models CPH (non-parametric) and AFT weibull (parametric) perform similarly.
+However, the AIC on the CPH model is much lower than on the AFT model.
+As the CPH model did not pass the proportional hazard test, we would recommend choosing the AFT model over the CPH.
 
-We observe a big difference in the AUC score, we observe the lowest for the CPH and AFT and that the SRF gets closer to the XGBoost. We can conclude that the model in the paper is more robust than those proposed in this document.
+On the other hand, looking at the SRF (Survival Random Forest) model, we see that outperforms the rest of the models and even the results published in the paper **for the C-index and the IBS scores**.
+
+The most significant discrepancies are shown in the AUC score, which is at its lowest with the CPH and AFT models, while the SRF is closer to the XGBoost.
+
+We can conclude that, due to its good performance on every score, the model in the paper is more robust than those proposed in this document.
 
 # Conclusion
-For simplification and to be able to compare models, we have respected the variable selection done at the beginning of the **Method's chapter**. However, in the original paper [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf), all the voltage charge variables are used for training an XGBoost model. A model using all the variables and Random Survival Forest was also trained and we have seen that it has better scores for the C-index and the IBS (on one test set) that the scores on shown in the paper (mean value on 100 test sets).
 
-We have seen that a parametric model as AFT, has its limitations as it depends on the distribution.
+For simplification and to be able to compare models, we have respected the variable selection done at the beginning of the **Method chapter**.
+However, in the original paper [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf), all the voltage charge variables are used for training an XGBoost model.
+In this document, a Survival Random Forest model is also trained using all the charge voltage variables, giving better scores for the C-index and the IBS (for one test set) than those shown in the paper (mean value on 100 test sets).
 
-On the other hand, if we use a Cox PH and we **do not have proportional hazards** (our case), we could truncate or stratify the data. Regarding stratification,it was a big limitation because we can not easily classify the path signatures of the voltage curves (*strat*).
-Regarding truncation we could think about truncating the data between 300 and 1200 cycles, where most of the event occur, and see if we pass a proportional hazard test.
+We have observed that a parametric model such as AFT has its limitations as it depends on the distribution. The weibull distribution was good enough to fit the data and give similar results as the Cox PH model.
 
-In conclusion, we have reproduce the methodology in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf) and obtained very good results with our Survival Random Forest model for the charging voltage curve model. Other models were proposed, but since Survival Random Forest outperforms the rest and its more flexible in terms of dealing with non-linearities, we could propose it for solving this problematic.
+On the other hand, if we use a Cox PH and we **do not have proportional hazards** (our case), we could truncate or stratify the data.
+Stratification was limiting as we could not easily classify the path signatures of the voltage curves (*strat*).
+Regarding truncation, we could think about truncating the data between 300 and 1200 cycles, where most of the event occur, and see if we pass a proportional hazard test, but with the drawback of loosing explainability on the whole lifecycle.
+
+To solve this a Survival Random Forest was proposed and gave the best results amid the other proposed models.
+
+In conclusion, we have reproduced the methodology in [[1]](https://www.pure.ed.ac.uk/ws/portalfiles/portal/489475390/main.04-REVISION-V2-MARKED.pdf) and obtained very good results with our Survival Random Forest model for the charging voltage curve model.
+Other models were tested, but since Survival Random Forest outperforms the rest and its more flexible in terms of dealing with non-linearities, we could recommend it to solve this topic.
 
 NB: The same methodology can be followed to produce models based on the **discharge voltage curves**.
+
+# Code availability
+
+The experiments carried out on this R markdown document can be found in <https://github.com/zBotta/survAn-batteries>.
+The objective of this code was purely academic in order to address a course project on Survival Analysis.
 
 # Bibliography
 
@@ -311,14 +380,12 @@ NB: The same methodology can be followed to produce models based on the **discha
 [[4] Attia Peter M. et al., Statistical Learning for Accurate and Interpretable Battery Lifetime Prediction](https://arxiv.org/abs/2101.01885)\
 [[5] Attia Peter M. et al., Data-driven prediction of battery cycle life before capacity degradation](https://www.nature.com/articles/s41560-019-0356-8)\
 
-# Code availability
-The experiments carried out on this R markdown document can be found in [https://github.com/zBotta/survAn-batteries](https://github.com/zBotta/survAn-batteries). The objective of this code was purely academic in order to address a course project on Survival Analysis.
-
 # Annex
 
 ## EDA: Extra plots
 
-In the figure below, we observe the evolution of the capacity of cell 45 form the batch 1 (b1c45). The capacity decreases as it has been cycled, until arriving to its EOL at 597 cycles.
+In the figure below, we observe the evolution of the capacity of cell 45 from batch 1 (b1c45).
+The capacity decreases as it has been cycled, until arriving to its EOL at 597 cycles.
 
 ```{r}
 capacity_b1c45 = df[["b1c45"]][["summary_data"]][["discharge_capacity"]]
@@ -326,6 +393,8 @@ cycles_b1c45 = df[["b1c45"]][["summary_data"]][["cycle"]]
 df_b1c45 = data.frame(capacity=capacity_b1c45, cycles=cycles_b1c45)
 EOL_b1c45 = df[["b1c45"]][["summary_data"]][["end_of_life"]]
 df_eol = data.frame(eol_cycle=EOL_b1c45, eol_capacity=capacity_b1c45[EOL_b1c45])
+
+jpeg('capacity_loss_until_eol.jpeg')
 ggplot(data = df_b1c45, aes(x = cycles_b1c45, y = capacity_b1c45)) +
   geom_line(lwd=1) +
   labs(x = "Cycles", 
@@ -341,9 +410,12 @@ ggplot(data = df_b1c45, aes(x = cycles_b1c45, y = capacity_b1c45)) +
                    force         = 100,
                    segment.color = "red",
                    direction     = "x")
+dev.off()
 ```
 
-Below the charge and discharge voltage curves of cell 45 form the batch 1 (b1c45) at cycle 50. Plotting all curves becomes difficult as the time stamp is different for each charge-discharge experiment. During the data treatment, data has been interpolated to respect a constant time stamp.
+Below the charge and discharge voltage curves of cell 45 form the batch 1 (b1c45) at cycle 50.
+Plotting all curves becomes difficult as the time stamp is different for each charge-discharge experiment.
+During the data treatment, data has been interpolated to respect a constant time stamp.
 
 ```{r}
 t_ch_b1c45 = df[["b1c45"]][["cycle_data"]][["50"]][["charge"]][[1]]
@@ -364,12 +436,16 @@ p2 <- ggplot(data = df_dch_b1c45, aes(x = t, y = V)) +
        y = "Voltage (V)") +
   theme_light()
 library(patchwork )
+jpeg('voltage_curves_on_cell-b1c45.jpeg')
 p1 + p2
+dev.off()
 ```
 
 ## Use cases of battery survival curve
+
 In a real world scenario applied on batteries, the survival curves could be used for:\
-1) Estimating the amount of batteries that a battery producer should have in stock to replace their installed battery packs. For instance, if we have a contract with our clients stating that we had to change the batteries when at least 70% of the batch cells arrive to its EOL, we could estimate after how many cycles we would need to start having a new battery on stock.
+1) Estimating the amount of batteries that a battery producer should have in stock to replace their installed battery packs.
+For instance, if we have a contract with our clients stating that we had to change the batteries when at least 70% of the batch cells arrive to its EOL, we could estimate after how many cycles we would need to start having a new battery on stock.
 
 The batteries experiencing at least 878 cycles with a 95%CI, would need to be replaced.
 
@@ -383,7 +459,6 @@ tbl_survfit(fit.KM , probs = c(0.7))
 
 ## Variable selection with SRF
 
-
 ```{r}
 # RF variable selection
 srf_ch.mod <- holdout.vimp(Surv(time_to_failure, failure) ~ ch_1+ch_2+ch_3+ch_4+ch_5+ch_6+ch_7+ch_8+ch_9+ch_10+ch_11+ch_12+ch_13+ch_14+ch_15+ch_16+ch_17+ch_18+ch_19+ch_20+ch_21+ch_22+ch_23+ch_24+ch_25+ch_26+ch_27+ch_28+ch_29+ch_30+ch_31+ch_32+ch_33+ch_34+ch_35+ch_36, data=d_train, splitrule = "logrank", ntree = 500)
@@ -393,7 +468,8 @@ one_sd_vimp = sd(na.omit(srf_ch.mod$importance))
 abs(na.omit(srf_ch.mod$importance)) > one_sd_vimp
 
 ```
-The selected variables are V2, V3, V4, V6, V7, V8, V11, V15, V21, V23, V25, V35, V36. 
+
+The selected variables are V2, V3, V4, V6, V7, V8, V11, V15, V21, V23, V25, V35, V36.
 
 ```{r}
 srf_ch_vimp.mod <- rfsrc(Surv(time_to_failure, failure) ~  ch_2 + ch_3 + ch_4 + ch_6 + ch_7 + ch_8 + ch_11 + ch_15 + ch_21 + ch_23 + ch_25 + ch_35 + ch_36, data=d_train, splitrule = "logrank", ntree = 500)
@@ -419,3 +495,4 @@ srf_ch_vimp.mod$IBS
 srf_ch_vimp.mod$ICD_AUC
 srf_ch_vimp.mod$AIC
 ```
+
