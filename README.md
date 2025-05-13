@@ -4,6 +4,23 @@ A survival analysis approach on estimating the EOL probability for a group of 8 
 ## Data source
 The cycling data on the 8 batches can be found at [https://data.matr.io/1/](https://data.matr.io/1/).
 
+## EDA
+The voltage charge and discharge curves on cell b1c45.
+
+![Voltage_ch_dch_curves](media/voltage_curves_on_cell-b1c45.jpeg)
+
+Capacity loss until EOL on a cell.
+
+![Capacity loss during cycle](media/capacity_loss_until_eol.jpeg)
+
+From the 8 batches, 4 were driven to the EOL (b1, b2, b3 and b8) and 4 were censored i.e. they left the experiment without arriving to EOL (b4, b5, b6 and b7). See the following figure (see Figure 3 in [1]).
+
+![EOL distribution and censorship summary of cells in each batch](media/eol_censorhip_per_batch.jpg)
+
+We can plot the survival curve of the Toyota batteries according to the EOL indicator.
+
+![Survival function on Toyota Batteries](media/survival_curve_on_all_batches.jpg)
+
 ## Motivation
 The use of Survival Analysis techniques on renewable resources was the main motivation. 
 
